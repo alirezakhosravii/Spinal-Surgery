@@ -1,64 +1,66 @@
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
+from scipy.stats import norm, bernoulli
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.svm import SVC
-from sklearn.metrics import accuracy_score, classification_report
-from sklearn.model_selection import GridSearchCV
+from sklearn.metrics import f1_score, classification_report
+from sklearn.model_selection import cross_val_score
 
-# Generate synthetic data
+# synthetic data generation
 np.random.seed(42)
 n_samples = 1000
-age = np.random.randint(20, 80, n_samples)
-gender = np.random.choice(['Male', 'Female'], n_samples)
-preoperative_pain_level = np.random.uniform(1, 10, n_samples)
-spinal_condition = np.random.choice(['Degenerative Disc Disease', 'Spinal Stenosis', 'Scoliosis'], n_samples)
-surgical_technique = np.random.choice(['PLIF', 'ALIF', 'TLIF'], n_samples)
-bone_density = np.random.uniform(0.8, 1.5, n_samples)
-num_vertebrae_fused = np.random.randint(1, 4, n_samples)
-smoking_status = np.random.choice(['Smoker', 'Non-Smoker'], n_samples)
-bmi = np.random.uniform(18, 35, n_samples)
 
-# Generate prognosis based on simplistic rules
+# Features
+age = norm.rvs(50, 15, size=n_samples).clip(20, 80)
+bmi = norm.rvs(25, 4, size=n_samples).clip(18, 35)
+gender = np.random.choice(['Male', 'Female'], n_samples)
+spinal_conditions = ['Degenerative Disc Disease', 'Spinal Stenosis', 'Scoliosis']
+spinal_condition = np.random.choice(spinal_conditions, n_samples, p=[0.4, 0.4, 0.2])
+surgical_technique_mapping = {'Degenerative Disc Disease': ['PLIF', 'ALIF'], 'Spinal Stenosis': ['ALIF', 'TLIF'], 'Scoliosis': ['PLIF', 'TLIF']}
+surgical_technique = [np.random.choice(surgical_technique_mapping[cond]) for cond in spinal_condition]
+surgical_complications = bernoulli.rvs(0.15, size=n_samples)
+postoperative_pain_level = norm.rvs(5, 2, size=n_samples).clip(0, 10)
+patient_satisfaction = norm.rvs(7, 2, size=n_samples).clip(1, 10)
+infection_risk = bernoulli.rvs(0.1, size=n_samples)
+
+# Prognosis
 prognosis = []
 for i in range(n_samples):
-    success_prob = 0.5
-    if age[i] < 40:
-        success_prob += 0.1
-    if preoperative_pain_level[i] < 5:
-        success_prob += 0.1
-    if bone_density[i] > 1:
-        success_prob += 0.1
-    if num_vertebrae_fused[i] == 1:
-        success_prob += 0.1
-    if smoking_status[i] == 'Non-Smoker':
-        success_prob += 0.1
-    prognosis.append('Successful' if np.random.rand() < success_prob else 'Unsuccessful')
+    success_factors = 0
+    if postoperative_pain_level[i] < 3:
+        success_factors += 1
+    if patient_satisfaction[i] > 8:
+        success_factors += 1
+    if surgical_complications[i] == 0:
+        success_factors += 1
+    if infection_risk[i] == 0:
+        success_factors += 1
+    prognosis.append('Successful' if success_factors >= 3 else 'Unsuccessful')
 
-# Create DataFrame
+# DataFrame creation
 data = pd.DataFrame({
     'Age': age,
     'Gender': gender,
-    'Preoperative_Pain_Level': preoperative_pain_level,
+    'BMI': bmi,
     'Spinal_Condition': spinal_condition,
     'Surgical_Technique': surgical_technique,
-    'Bone_Density': bone_density,
-    'Num_Vertebrate_Fused': num_vertebrae_fused,
-    'Smoking_Status': smoking_status,
-    'BMI': bmi,
+    'Surgical_Complications': surgical_complications,
+    'Postoperative_Pain_Level': postoperative_pain_level,
+    'Patient_Satisfaction': patient_satisfaction,
+    'Infection_Risk': infection_risk,
     'Prognosis': prognosis
 })
 
 # Preprocessing
-cat_features = ['Gender', 'Spinal_Condition', 'Surgical_Technique', 'Smoking_Status']
-cont_features = ['Age', 'Preoperative_Pain_Level', 'Bone_Density', 'Num_Vertebrate_Fused', 'BMI']
+cat_features = ['Gender', 'Spinal_Condition', 'Surgical_Technique', 'Surgical_Complications', 'Infection_Risk']
+cont_features = ['Age', 'BMI', 'Postoperative_Pain_Level', 'Patient_Satisfaction']
 
-preprocessor = ColumnTransformer(
-    transformers=[
-        ('num', StandardScaler(), cont_features),
-        ('cat', OneHotEncoder(), cat_features)])
+preprocessor = ColumnTransformer(transformers=[
+    ('num', StandardScaler(), cont_features),
+    ('cat', OneHotEncoder(), cat_features)])
 
 # Split data
 X = data.drop('Prognosis', axis=1)
@@ -73,10 +75,13 @@ grid_search.fit(X_train, y_train)
 
 # Model evaluation
 y_pred = grid_search.predict(X_test)
-test_accuracy = accuracy_score(y_test, y_pred)
+f1 = f1_score(y_test, y_pred, average='weighted')
 classification_rep = classification_report(y_test, y_pred)
 
+# Cross-validation score
+cross_val_score_result = cross_val_score(grid_search, X, y, cv=5)
+
 print("Best Parameters:", grid_search.best_params_)
-print("Cross-validation Accuracy:", grid_search.best_score_)
-print("Test Set Accuracy:", test_accuracy)
-print("Classification Report:", classification_rep)
+print("F1 Score:", f1)
+print("Classification Report:\n", classification_rep)
+print("Cross-validation Score:", np.mean(cross_val_score_result))
