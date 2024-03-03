@@ -1,0 +1,127 @@
+import pandas as pd
+import numpy as np
+from scipy.stats import norm, bernoulli
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.svm import SVC
+from sklearn.metrics import f1_score, classification_report
+from sklearn.model_selection import cross_val_score
+import joblib
+
+
+# Synthetic data generation
+np.random.seed(42)
+n_samples = 5000
+
+# Features
+age = norm.rvs(50, 15, size=n_samples).clip(20, 80)
+bmi = norm.rvs(25, 4, size=n_samples).clip(18, 35)
+gender = np.random.choice(['Male', 'Female'], n_samples)
+spinal_conditions = ['Degenerative Disc Disease', 'Spinal Stenosis', 'Scoliosis']
+spinal_condition = np.random.choice(spinal_conditions, n_samples, p=[0.4, 0.4, 0.2])
+surgical_technique_mapping = {
+    'Degenerative Disc Disease': ['PLIF', 'ALIF'],
+    'Spinal Stenosis': ['ALIF', 'TLIF'],
+    'Scoliosis': ['PLIF', 'TLIF']
+}
+surgical_technique = [np.random.choice(surgical_technique_mapping[cond]) for cond in spinal_condition]
+surgical_complications = bernoulli.rvs(0.15, size=n_samples)
+postoperative_pain_level = norm.rvs(5, 2, size=n_samples).clip(0, 10)
+patient_satisfaction = norm.rvs(7, 2, size=n_samples).clip(1, 10)
+infection_risk = bernoulli.rvs(0.1, size=n_samples)
+comorbidities = ['None', 'Diabetes', 'Cardiovascular Disease', 'Respiratory Disease', 'Obesity', 'Chronic Kidney Disease', 'Autoimmune Disorders', 'Mental Health Disorders']
+comorbidity_distribution = [0.4, 0.15, 0.15, 0.1, 0.1, 0.05, 0.03, 0.02]
+comorbidity = np.random.choice(comorbidities, n_samples, p=comorbidity_distribution)
+
+# Prognosis
+short_term_prognosis = []
+long_term_prognosis = []
+for i in range(n_samples):
+    short_term_factors = 0
+    long_term_factors = 0
+    if postoperative_pain_level[i] < 3:
+        short_term_factors += 1
+        long_term_factors += 1  # Assuming pain level impacts both short and long term
+    if patient_satisfaction[i] > 8:
+        long_term_factors += 1  # Assuming satisfaction is more related to long-term outcome
+    if surgical_complications[i] == 0:
+        short_term_factors += 1
+        long_term_factors += 1
+    if infection_risk[i] == 0:
+        short_term_factors += 1  # Infection risk might have immediate impact
+    
+    short_term_prognosis.append('Successful' if short_term_factors >= 2 else 'Unsuccessful')
+    long_term_prognosis.append('Successful' if long_term_factors >= 2 else 'Unsuccessful')
+
+# DataFrame creation
+data = pd.DataFrame({
+    'Age': age,
+    'Gender': gender,
+    'BMI': bmi,
+    'Spinal_Condition': spinal_condition,
+    'Surgical_Technique': surgical_technique,
+    'Surgical_Complications': surgical_complications,
+    'Postoperative_Pain_Level': postoperative_pain_level,
+    'Patient_Satisfaction': patient_satisfaction,
+    'Infection_Risk': infection_risk,
+    'Comorbidity': comorbidity,
+    'Short_Term_Prognosis': short_term_prognosis,
+    'Long_Term_Prognosis': long_term_prognosis
+})
+
+# Preprocessing
+cat_features = ['Gender', 'Spinal_Condition', 'Surgical_Technique', 'Surgical_Complications', 'Infection_Risk', 'Comorbidity']
+cont_features = ['Age', 'BMI', 'Postoperative_Pain_Level', 'Patient_Satisfaction']
+
+preprocessor = ColumnTransformer(transformers=[
+    ('num', StandardScaler(), cont_features),
+    ('cat', OneHotEncoder(), cat_features)])
+
+# Split data for short-term prognosis
+X_short = data.drop(['Short_Term_Prognosis', 'Long_Term_Prognosis'], axis=1)
+y_short = data['Short_Term_Prognosis']
+X_train_short, X_test_short, y_train_short, y_test_short = train_test_split(X_short, y_short, test_size=0.2, random_state=42)
+
+# Split data for long-term prognosis
+X_long = X_short  # Same features
+y_long = data['Long_Term_Prognosis']
+X_train_long, X_test_long, y_train_long, y_test_long = train_test_split(X_long, y_long, test_size=0.2, random_state=42)
+
+joblib.dump(preprocessor, 'data_preprocessor.pkl')
+
+
+# Model training and hyperparameter tuning for short-term prognosis
+pipeline_short = Pipeline(steps=[('preprocessor', preprocessor), ('classifier', SVC())])
+param_grid_short = {'classifier__C': [0.1, 1, 10], 'classifier__gamma': [0.001, 0.01, 0.1, 1]}
+grid_search_short = GridSearchCV(pipeline_short, param_grid_short, cv=5)
+grid_search_short.fit(X_train_short, y_train_short)
+
+# Model evaluation for short-term prognosis
+y_pred_short = grid_search_short.predict(X_test_short)
+f1_short = f1_score(y_test_short, y_pred_short, average='weighted')
+classification_rep_short = classification_report(y_test_short, y_pred_short)
+
+# Model training and hyperparameter tuning for long-term prognosis
+pipeline_long = Pipeline(steps=[('preprocessor', preprocessor), ('classifier', SVC())])
+param_grid_long = {'classifier__C': [0.1, 1, 10], 'classifier__gamma': [0.001, 0.01, 0.1, 1]}
+grid_search_long = GridSearchCV(pipeline_long, param_grid_long, cv=5)
+grid_search_long.fit(X_train_long, y_train_long)
+
+# Model evaluation for long-term prognosis
+y_pred_long = grid_search_long.predict(X_test_long)
+f1_long = f1_score(y_test_long, y_pred_long, average='weighted')
+classification_rep_long = classification_report(y_test_long, y_pred_long)
+
+print("Short-term prognosis - Best Parameters:", grid_search_short.best_params_)
+print("Short-term prognosis - F1 Score:", f1_short)
+print("Short-term prognosis - Classification Report:\n", classification_rep_short)
+
+print("\nLong-term prognosis - Best Parameters:", grid_search_long.best_params_)
+print("Long-term prognosis - F1 Score:", f1_long)
+print("Long-term prognosis - Classification Report:\n", classification_rep_long)
+joblib.dump(grid_search_long, 'svm_model_long_term_prognosis.pkl')
+joblib.dump(grid_search_short, 'svm_model_short_term_prognosis.pkl')
+
+print("Models have been saved.")
